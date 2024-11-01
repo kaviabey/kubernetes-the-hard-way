@@ -1,0 +1,138 @@
+provider "aws" {
+  region = "ap-south-1"  # Mumbai region
+}
+# Generate SSH Key Pair
+resource "tls_private_key" "k8s_extra_pair" {
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+# Register the public key with AWS
+resource "aws_key_pair" "k8s_extra_pair" {
+  key_name   = "k8s_extra_pair"  # Adjust to your desired key name
+  public_key = tls_private_key.k8s_extra_pair.public_key_openssh
+
+}
+
+
+
+# Save the private key locally
+resource "local_file" "TF-key" {
+    content  = tls_private_key.k8s_extra_pair.private_key_pem
+    filename = "tfkey"
+}
+
+
+
+# Save the private key locally
+output "private_key" {
+  value     = tls_private_key.k8s_extra_pair.private_key_pem
+  sensitive = true
+}
+
+resource "aws_security_group" "k8s_sg" {
+  name        = "k8s_security_group"
+  description = "Allow SSH and Kubernetes traffic"
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 6443
+    to_port     = 6443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+variable "instance_type" {
+  default = "t4g.small"
+}
+
+variable "ami" {
+  default = "ami-064fa6488b8559375"  # Amazon Linux 2 AMI ID for Mumbai region
+}
+
+resource "aws_instance" "k8s_master" {
+  ami                = var.ami
+  instance_type     = var.instance_type
+  key_name          = aws_key_pair.k8s_extra_pair.key_name
+  security_groups   = [aws_security_group.k8s_sg.name]
+  availability_zone = "ap-south-1a"
+  tags = {
+    Name = "K8s Master"
+  }
+
+  root_block_device {
+    volume_size = 20
+  }
+}
+
+resource "aws_instance" "k8s_worker_0" {
+  ami                = var.ami
+  instance_type     = var.instance_type
+  key_name          = aws_key_pair.k8s_extra_pair.key_name
+  security_groups   = [aws_security_group.k8s_sg.name]
+  availability_zone = "ap-south-1b"  # Changed for high availability
+  tags = {
+    Name = "K8s Worker 0"
+  }
+
+  root_block_device {
+    volume_size = 20
+  }
+}
+
+resource "aws_instance" "k8s_worker_1" {
+  ami                = var.ami
+  instance_type     = var.instance_type
+  key_name          = aws_key_pair.k8s_extra_pair.key_name
+  security_groups   = [aws_security_group.k8s_sg.name]
+  availability_zone = "ap-south-1c"  # Changed for high availability
+  tags = {
+    Name = "K8s Worker 1"
+  }
+
+  root_block_device {
+    volume_size = 20
+  }
+}
+# Jumpbox (Administration Host) Configuration
+resource "aws_instance" "jumpbox" {
+  ami                = var.ami                  # Reuse the same AMI as the other instances
+  instance_type      = "t4g.nano"          # Small instance type with 512 MB RAM equivalent
+  key_name           = aws_key_pair.k8s_extra_pair.key_name
+  security_groups    = [aws_security_group.k8s_sg.name]  # Attach the same security group
+
+  root_block_device {
+    volume_size = 10                            # 10GB root volume
+  }
+
+  tags = {
+    Name = "Jumpbox"
+  }
+}
+
+output "master_public_ip" {
+  value = aws_instance.k8s_master.public_ip
+}
+
+output "worker_0_public_ip" {
+  value = aws_instance.k8s_worker_0.public_ip
+}
+
+output "worker_1_public_ip" {
+  value = aws_instance.k8s_worker_1.public_ip
+}
+
